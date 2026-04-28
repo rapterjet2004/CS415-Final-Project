@@ -14,7 +14,7 @@ Air Piano - a finger tracking computer vision application for playing musical no
 - TODO
 
 ## Instructions for user
-- Install mediapipe tasks here - https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+- Install mediapipe tasks here (for finger tracking) ---- https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
 
 ## Demo
 - TODO
