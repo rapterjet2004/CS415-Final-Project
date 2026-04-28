@@ -1,67 +1,127 @@
 import cv2
 import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 import pygame
 
+# Set up key sounds
 pygame.mixer.init()
+white_names = ['C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'B4']
+black_names = ['Db4', 'Eb4', 'Gb4', 'Ab4', 'Bb4']
 
-piano_notes = ['C4.mp3', 'Db4.mp3', 'D4.mp3', 'Eb4.mp3', 'E4.mp3', 'F4.mp3', 'Gb4.mp3', 'G4.mp3']
-sounds = [pygame.mixer.Sound(note) for note in piano_notes]
+sounds = {}
+for name in white_names + black_names:
+    try:
+        sounds[name] = pygame.mixer.Sound(name + ".mp3")
+    except:
+        print(f"Warning: Missing {name}.mp3")
 
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7)
-mp_draw = mp.solutions.drawing_utils
+# Setup piano screen
+screen_width = 1280
+screen_height = 720
+key_w = screen_width // 7 
+key_h = 400
 
+# Add labels to white keys
+white_keys = []
+for i in range(7):
+    x1 = i * key_w
+    x2 = (i + 1) * key_w
+    if i == 6: x2 = screen_width 
+    white_keys.append([x1, 0, x2, key_h, white_names[i]])
 
-num_keys = len(piano_notes)
-width, height = 1280, 720
-key_width = width // num_keys
+# Add labels to black keys
+black_keys = []
+bw, bh = 100, 250
+seams = [1, 2, 4, 5, 6] 
+for i in range(5):
+    center_x = seams[i] * key_w
+    x1 = center_x - (bw // 2)
+    black_keys.append([x1, 0, x1 + bw, bh, black_names[i]])
 
-last_key = -1
+# Setup finger tracking
+base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
+options = vision.HandLandmarkerOptions(base_options=base_options, num_hands=2)
+detector = vision.HandLandmarker.create_from_options(options)
 
 cap = cv2.VideoCapture(0)
-cap.set(3, width)
-cap.set(4, height)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, screen_width)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, screen_height)
+
+# Last positions of left and right fingers
+last_left, last_right = "", ""
+
+cv2.namedWindow("Air Piano", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("Air Piano", screen_width, screen_height)
 
 while cap.isOpened():
     success, frame = cap.read()
     if not success: break
 
     frame = cv2.flip(frame, 1)
+    frame = cv2.resize(frame, (screen_width, screen_height))
+    
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = hands.process(rgb_frame)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+    result = detector.detect(mp_image)
 
-    for i in range(num_keys):
-        color = (200, 200, 200) if i != last_key else (0, 255, 0)
-        cv2.rectangle(frame, (i * key_width, 0), ((i + 1) * key_width, 100), color, -1)
-        cv2.rectangle(frame, (i * key_width, 0), ((i + 1) * key_width, 100), (0, 0, 0), 2)
-        cv2.putText(frame, piano_notes[i][:2], (i * key_width + 10, 60), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+    # Finds fingers 
+    current_touch_left = ""
+    current_touch_right = ""
+    finger_positions = [] # Stores finger positions
 
-    current_key = -1
-    if results.multi_hand_landmarks:
-        for hand_lms in results.multi_hand_landmarks:
+    if result.hand_landmarks:
+        for idx, hand in enumerate(result.hand_landmarks):
+            tip = hand[8]
+            fx, fy = int(tip.x * screen_width), int(tip.y * screen_height)
+            finger_positions.append((fx, fy)) 
 
-            index_finger_tip = hand_lms.landmark[8]
-            x, y = int(index_finger_tip.x * width), int(index_finger_tip.y * height)
+            if fy < key_h:
+                note = ""
+                for k in black_keys:
+                    if fx > k[0] and fx < k[2] and fy < k[3]:
+                        note = k[4]
+                if note == "":
+                    for k in white_keys:
+                        if fx > k[0] and fx < k[2]:
+                            note = k[4]
+                
+                if idx == 0: current_touch_left = note
+                else: current_touch_right = note
 
-            cv2.circle(frame, (x, y), 15, (255, 0, 255), cv2.FILLED)
+    # Draw white keys
+    for k in white_keys:
+        pressed = (k[4] == current_touch_left or k[4] == current_touch_right)
+        color = (150, 255, 150) if pressed else (255, 255, 255)
+        cv2.rectangle(frame, (k[0], k[1]), (k[2], k[3]), color, -1)
+        cv2.rectangle(frame, (k[0], k[1]), (k[2], k[3]), (0, 0, 0), 2)
+        cv2.putText(frame, k[4][0], (k[0] + 70, 370), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,0,0), 3)
 
+    # Draw black keys
+    for k in black_keys:
+        pressed = (k[4] == current_touch_left or k[4] == current_touch_right)
+        color = (0, 200, 0) if pressed else (30, 30, 30)
+        cv2.rectangle(frame, (int(k[0]), k[1]), (int(k[2]), k[3]), color, -1)
+        cv2.rectangle(frame, (int(k[0]), int(k[1])), (int(k[2]), int(k[3])), (0, 0, 0), 2)
+        cv2.putText(frame, k[4][:2], (int(k[0]) + 15, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
 
-            if y < 100:
-                current_key = x // key_width
+    # Draw finger tracking circles
+    for pos in finger_positions:
+        # Draw the purple circle on top of everything else
+        cv2.circle(frame, pos, 20, (255, 0, 255), -1)
+        cv2.circle(frame, pos, 22, (255, 255, 255), 2)
 
-                if current_key != last_key:
-                    sounds[current_key].play()
-                    last_key = current_key
-
-            if y > 100:
-                last_key = -1
-
-            mp_draw.draw_landmarks(frame, hand_lms, mp_hands.HAND_CONNECTIONS)
+    # Play each sound
+    if current_touch_left != last_left:
+        if current_touch_left: sounds[current_touch_left].play()
+        last_left = current_touch_left
+        
+    if current_touch_right != last_right:
+        if current_touch_right: sounds[current_touch_right].play()
+        last_right = current_touch_right
 
     cv2.imshow("Air Piano", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    if cv2.waitKey(1) == ord('q'): break
 
 cap.release()
-cv2.destroyAllWindows() 
+cv2.destroyAllWindows()
